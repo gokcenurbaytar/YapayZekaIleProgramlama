@@ -1,0 +1,159 @@
+======================================================================
+      YAPAY ZEKA DESTEKLİ KOD GÜVENLİK ANALİZÖRÜ (SAST)
+======================================================================
+
+==== TEST EDİLİYOR: SQL Injection Zafiyeti ====
+----------------------------------------------------------------------
+[API BAĞLANTI HATASI] 503 UNAVAILABLE. {'error': {'code': 503, 'message': 'This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.', 'status': 'UNAVAILABLE'}}
+======================================================================
+
+==== TEST EDİLİYOR: Hardcoded (Sabit) Parola ====
+----------------------------------------------------------------------
+[ÖN BİLGİ] 'Açık Parola İfşası' algılandı. Kod çalıştırılmayacak, sadece analiz edilecektir.
+
+--- STATİK ANALİZ SONUCU ---
+1. Tespit Edilen Güvenlik Açığı: **Hardcoded Credentials (Kod İçerisinde Sabitlenmiş Kimlik Bilgileri)** ve **Zayıf Parola Kullanımı**. Hassas verilerin (veritabanı şifresi vb.) ve bağlantı parametrelerinin kaynak kod içerisinde düz metin (plaintext) olarak saklanması durumu.
+
+2. Neden Oluştuğu: `veritabani_baglantisi` fonksiyonu içerisinde `psycopg2.connect` metodu çağrılırken, veritabanı kullanıcı adı (`user="admin"`) ve şifresi (`password="8888"`) doğrudan kaynak koda yazılmıştır. Ayrıca kullanılan `"8888"` şifresi, endüstri standardı güvenlik gereksinimlerini (karakter karmaşıklığı, uzunluk vb.) karşılamayan son derece zayıf bir paroladır. Bu durum, kaynak kodun yetkisiz kişilerin eline geçmesi, sürüm kontrol sistemlerine (örn. GitHub) yanlışlıkla commit edilmesi veya kodun decompilation (tersine mühendislik) işlemlerine maruz kalması durumunda kimlik bilgilerinin doğrudan açıkta kalmasına neden olur.
+
+3. Olası Etkileri: 
+   - **Veri Sızıntısı (Data Breach):** Kötü niyetli bir saldırgan kaynak koduna erişirse, veritabanı kimlik bilgilerini (username ve password) doğrudan elde edebilir.
+   - **Sistemin Ele Geçirilmesi (Unauthorized Access):** Elde edilen bu bilgilerle (`admin` yetkileriyle) doğrudan veritabanı sunucusuna dışarıdan (veya içeriden) bağlantı kurulabilir.
+   - **Veri Manipülasyonu ve Kaybı:** Yetkisiz bir kullanıcı veritabanındaki tüm tabloları okuyabilir, değiştirebilir, silebilir veya veritabanı sunucusu üzerinden işletim sistemine yönelik ek saldırılar (yetki yükseltme, zararlı yazılım çalıştırma vb.) gerçekleştirebilir.
+
+4. Güvenli ve Optimize Edilmiş Kod:
+
+```python
+import os
+import psycopg2
+from psycopg2 import OperationalError
+
+def veritabani_baglantisi():
+    """
+    Çevre değişkenlerini (environment variables) kullanarak güvenli 
+    bir şekilde PostgreSQL veritabanı bağlantısı kurar.
+    """
+    try:
+        connection = psycopg2.connect(
+            host=os.getenv("DB_HOST", "localhost"),
+            database=os.getenv("DB_NAME", "eticaret"),
+            user=os.getenv("DB_USER"),
+            password=os.getenv("DB_PASSWORD"),
+            port=os.getenv("DB_PORT", "5432")
+        )
+        return connection
+    except OperationalError as e:
+        # Hata yönetimi ile hassas veritabanı detaylarının loglara sızması engellenir
+        print("Veritabanı bağlantı hatası oluştu.")
+        # Gerçek uygulamalarda bu hata loglama mekanizmalarına (logging) yönlendirilmelidir.
+        return None
+
+if __name__ == "__main__":
+    baglanti = veritabani_baglantisi()
+    if baglanti:
+        print("Bağlantı başarılı.")
+        baglanti.close()
+```
+
+[BAŞARILI] Rapor istenen tüm maddeleri eksiksiz içeriyor.
+======================================================================
+
+==== TEST EDİLİYOR: Command (Komut) Enjeksiyonu ====
+----------------------------------------------------------------------
+[ÖN BİLGİ] 'Sistem Komutu' algılandı. Kod çalıştırılmayacak, sadece analiz edilecektir.
+
+--- STATİK ANALİZ SONUCU ---
+Kıdemli bir Siber Güvenlik Uzmanı ve Yazılım Mühendisi olarak tarafıma ilettiğiniz Python kodunun analizi aşağıdadır:
+
+### 1. Tespit Edilen Güvenlik Açığı:
+**Komut Enjeksiyonu (Command Injection / OS Command Injection)**
+Bu açık, uygulamanın kullanıcıdan gelen girdiyi doğrudan ve hiçbir doğrulama, filtreleme veya kaçış (escaping) işlemine tabi tutmadan bir işletim sistemi komut yürütücüsüne iletmesi durumunda ortaya çıkar.
+
+### 2. Neden Oluştuğu:
+Açık, kodun şu satırından kaynaklanmaktadır:
+```python
+os.system("ping -c 1 " + hedef)
+```
+* **Kök Neden:** `os.system()` fonksiyonu, verilen string ifadeyi doğrudan sistemin kabuğuna (`/bin/sh` vb.) göndererek çalıştırır. `hedef` değişkeni için kullanıcıdan alınan girdi (`input()`), kabuk meta-karakterlerinin (örn. `;`, `&&`, `|`, `` ` ``, `$()`) kullanımına karşı sanitize edilmemiştir. 
+* **Eksik Mekanizmalar:** Girdi Doğrulama (Input Validation), Girdi Sanitizasyonu (Input Sanitization) ve parametreize edilmiş komut çalıştırma mekanizmaları eksiktir. Girdi bir veri olarak değil, doğrudan komutun bir parçası olarak işleme alınmaktadır.
+
+### 3. Olası Etkileri:
+Kötü niyetli bir saldırgan, `hedef` girdisi yerine özel karakterler kullanarak sistemde istenilen komutları çalıştırabilir. Örneğin, kullanıcı girdisi olarak şu şekilde bir değer girilirse:
+`8.8.8.8; cat /etc/passwd`
+Çalıştırılacak nihai komut şu şekilde olacaktır:
+`ping -c 1 8.8.8.8; cat /etc/passwd`
+
+* **Veri Sızıntısı (Data Exfiltration):** Hassas sistem dosyaları (`/etc/passwd`, yapılandırma dosyaları, çevre değişkenleri vb.) okunabilir ve dışarı sızdırılabilir.
+* **Sistemin Ele Geçirilmesi (RCE - Remote Code Execution):** Saldırgan sunucu üzerinde yetki yükseltebilir, zararlı yazılımlar indirebilir, arka kapı (backdoor) açabilir veya tüm sistemi tamamen kontrolü altına alabilir.
+* **Hizmet Engelleme (DoS):** Sunucunun kaynak tüketimi artırılabilir veya kritik sistem servisleri durdurulabilir.
+
+### 4. Güvenli ve Optimize Edilmiş Kod:
+Bu tür güvenlik açıklarını önlemek için kabuk (shell) kullanımından kaçınılmalı ve komutlar argüman listesi olarak `subprocess` modülü ile çalıştırılmalıdır. Ayrıca, girdinin gerçekten bir IP adresi veya geçerli bir Alan Adı (FQDN) olup olmadığını doğrulamak (Regex ile) en iyi güvenlik pratiklerindendir.
+
+```python
+import subprocess
+import re
+import ipaddress
+
+def ip_veya_domain_gecerli_mi(deger: str) -> bool:
+    """
+    Girdinin geçerli bir IPv4/IPv6 adresi veya geçerli bir FQDN (alan adı) 
+    olup olmadığını kontrol eder (Command Injection önlemi).
+    """
+    # 1. IP Adresi kontrolü
+    try:
+        ipaddress.ip_address(deger)
+        return True
+    except ValueError:
+        pass
+
+    # 2. Alan Adı (Domain) kontrolü için Regex
+    # Sadece alfanumerik karakterler, tire ve noktaya izin verir.
+    domain_pattern = re.compile(
+        r"^(?=^.{1,253}$)(^([a-zA-Z0-9-_]{1,63}\.)+[a-zA-Z]{2,63}$)"
+    )
+    if domain_pattern.match(deger):
+        return True
+
+    return False
+
+def sunucu_kontrol(hedef: str):
+    # Girdinin doğrulanması (Input Validation)
+    if not ip_veya_domain_gecerli_mi(hedef):
+        raise ValueError("Geçersiz sunucu adresi veya IP formatı!")
+
+    try:
+        # shell=False (varsayılan) kullanarak komutun kabuk üzerinden çalıştırılmasını engelliyoruz.
+        # Argümanları liste olarak vererek komut enjeksiyonu vektörlerini kapatıyoruz.
+        sonuc = subprocess.run(
+            ["ping", "-c", "1", hedef],
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=5 # Zaman aşımı (Timeout) ekleyerek DoS riskini azaltıyoruz
+        )
+        print("Çıktı:\n", sonuc.stdout)
+    
+    except subprocess.CalledProcessError as e:
+        print(f"Sunucuya ulaşılamadı veya hata oluştu. Kod: {e.returncode}")
+    except subprocess.TimeoutExpired:
+        print("İşlem zaman aşımına uğradı.")
+    except Exception as e:
+        print(f"Bekmeyen bir hata oluştu: {e}")
+
+if __name__ == "__main__":
+    kullanici_ girdisi = input("Sunucu adresi: ").strip()
+    try:
+        sunucu_kontrol(kullanici_girdisi)
+    except ValueError as ve:
+        print(f"Güvenlik Uyarısı: {ve}")
+```
+
+[DİKKAT] Şablona uymayan eksik maddeler: 1., 2., 3., 4.
+======================================================================
+
+>>> TÜM GÜVENLİK TESTLERİ TAMAMLANDI <<<
+Öğrenci Adı: Gökçe Nur Baytar
+Öğrenci No: 363425013
+Değerlendirme Notu: 
+======================================================================
